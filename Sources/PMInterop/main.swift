@@ -236,5 +236,6 @@ func victimBundle(for wallet: Curve25519.Signing.PrivateKey) throws -> PrekeyBun
     )
     var secret = wallet.rawRepresentation                    // 32-byte Ed25519 seed
     secret.append(wallet.publicKey.rawRepresentation)        // 32-byte public key
-    return raw.walletSigned(address: SolanaAddress.string(from: seed), keypair: KeyPair(secretKey: secret))
+    let address = SolanaAddress.string(from: wallet.publicKey.rawRepresentation)
+    return raw.walletSigned(address: address, keypair: KeyPair(secretKey: secret))
 }
