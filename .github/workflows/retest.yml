@@ -219,6 +219,11 @@ jobs:
       - name: Build and run the end-to-end tests
         run: |
           set -o pipefail
+          # Xcode 26 turns on "approachable concurrency", which changes the
+          # isolation of the async closures that @Observable synthesises inside
+          # RelayService. The vendor project is built for Swift 5 language mode,
+          # so those newer defaults are switched back off here instead of
+          # touching vendor source.
           xcodebuild test \
             -project vendor/privamesh.xcodeproj \
             -scheme privamesh \
@@ -226,6 +231,10 @@ jobs:
             -only-testing:privameshUITests/AttackE2ETests \
             -resultBundlePath retest/e2e.xcresult \
             CODE_SIGNING_ALLOWED=NO \
+            SWIFT_VERSION=5.0 \
+            SWIFT_APPROACHABLE_CONCURRENCY=NO \
+            SWIFT_DEFAULT_ACTOR_ISOLATION=nonisolated \
+            SWIFT_STRICT_CONCURRENCY=minimal \
             2>&1 | tee retest-xcodebuild.log | tail -150
           echo "xcodebuild exit: ${PIPESTATUS[0]}"
 
