@@ -69,10 +69,13 @@ def main() -> int:
 
 import Foundation
 
+/// Mirrors only the one property the vendor block reads off `card`.
+struct CardRef {{ let address: String }}
+
 func realAddFromQRGuard(bundle: PrekeyBundle, cardAddress: String) -> (accepted: Bool, reason: String) {{
     var errorMessage: String?
     var showError = false
-    let card = (address: cardAddress)
+    let card = CardRef(address: cardAddress)
     var guardFired = true
 
     func inner() {{
@@ -81,6 +84,8 @@ func realAddFromQRGuard(bundle: PrekeyBundle, cardAddress: String) -> (accepted:
     footer = """
         guardFired = false
     }
+
+    _ = showError   // written by the vendor block, read here only to keep the log clean
 
     inner()
 
