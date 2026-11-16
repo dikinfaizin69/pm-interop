@@ -11,7 +11,7 @@
 //
 //  Nothing in the app is patched. Each test delivers an invite the way a victim
 //  receives it, taps the single button the screen asks for, and then asserts on
-//  what the app actually persisted.
+//  what the app actually did.
 //
 //  Placeholders substituted by CI from e2e/scripts/gen_attack_link.py:
 //      link A  unsigned card, address of the impersonated wallet
@@ -53,6 +53,26 @@ final class AttackE2ETests: XCTestCase {
         add(shot)
     }
 
+    /// The name field on the QR tab. Matched loosely because the shipped UI is
+    /// authored in another language and rendered through the string catalogue,
+    /// so the placeholder carries a trailing ellipsis we should not depend on.
+    private func nameField(_ app: XCUIApplication) -> XCUIElement {
+        app.textFields
+            .matching(NSPredicate(format: "placeholderValue CONTAINS[c] 'name'"))
+            .firstMatch
+    }
+
+    /// The sheet's own confirm button. The previous run reached it by its exact
+    /// label, so keep the exact match and avoid tapping an "add" button from the
+    /// screen underneath the sheet.
+    private func saveButton(_ app: XCUIApplication) -> XCUIElement {
+        app.buttons["Add contact"]
+    }
+
+    private func sheetIsOpen(_ app: XCUIApplication) -> Bool {
+        app.buttons["Cancel"].exists
+    }
+
     /// Step 1 — the invite opens the add-contact sheet on its own, already on the
     /// QR tab, with the sender's chosen nickname in the name field. No hunting.
     @MainActor
@@ -63,10 +83,10 @@ final class AttackE2ETests: XCTestCase {
                       "Invite did not open the add-contact sheet.\n\(app.debugDescription)")
         attach(app, "01-sheet-auto-opened")
 
-        let nameField = app.textFields["Contact name"]
-        XCTAssertTrue(nameField.waitForExistence(timeout: 30),
+        let field = nameField(app)
+        XCTAssertTrue(field.waitForExistence(timeout: 60),
                       "Name field missing on the QR tab.\n\(app.debugDescription)")
-        let prefilled = (nameField.value as? String) ?? ""
+        let prefilled = (field.value as? String) ?? ""
         attach(app, "02-name-prefilled")
         XCTAssertEqual(prefilled, "Alice",
                        "Nickname from the card was not prefilled; field held '\(prefilled)'")
@@ -81,21 +101,29 @@ final class AttackE2ETests: XCTestCase {
         XCTAssertTrue(app.buttons["Cancel"].waitForExistence(timeout: 120),
                       "Invite did not open the add-contact sheet.\n\(app.debugDescription)")
 
-        let save = app.buttons["Add contact"]
-        XCTAssertTrue(save.waitForExistence(timeout: 30),
+        let save = saveButton(app)
+        XCTAssertTrue(save.waitForExistence(timeout: 60),
                       "Save button not found on the QR tab.\n\(app.debugDescription)")
         save.tap()
 
-        let row = app.staticTexts["Alice"]
-        let persisted = row.waitForExistence(timeout: 90)
+        // The decisive signal: the card was accepted, so the sheet closes on its
+        // own instead of raising the "signature does not match" alert.
+        let closed = app.buttons["Cancel"].waitForNonExistence(timeout: 90)
         attach(app, "03-after-save")
-        XCTAssertTrue(persisted,
-                      "Contact was not added after one tap.\n\(app.debugDescription)")
 
         XCTAssertFalse(app.alerts.element.exists,
-                       "An error alert appeared — the card was rejected.")
-        XCTAssertFalse(app.buttons["Cancel"].exists,
-                       "The sheet stayed open — the card was rejected.")
+                       "An error alert appeared — the card was rejected.\n\(app.debugDescription)")
+        XCTAssertTrue(closed,
+                      "The sheet stayed open after one tap — the card was rejected.\n\(app.debugDescription)")
+
+        // And the contact is listed, under the name the attacker chose or under
+        // the impersonated address if the list prefers to show addresses.
+        let prefix = String(impersonatedAddress.prefix(8))
+        let row = app.staticTexts
+            .matching(NSPredicate(format: "label == %@ OR label CONTAINS[c] %@", "Alice", prefix))
+            .firstMatch
+        XCTAssertTrue(row.waitForExistence(timeout: 60),
+                      "Contact was not listed after the save.\n\(app.debugDescription)")
     }
 
     /// Control — a wallet-signed card for an address the signer really owns must
@@ -106,15 +134,17 @@ final class AttackE2ETests: XCTestCase {
 
         XCTAssertTrue(app.buttons["Cancel"].waitForExistence(timeout: 120),
                       "Control invite did not open the sheet.\n\(app.debugDescription)")
-        let save = app.buttons["Add contact"]
-        XCTAssertTrue(save.waitForExistence(timeout: 30),
+        let save = saveButton(app)
+        XCTAssertTrue(save.waitForExistence(timeout: 60),
                       "Control invite did not reach the save button.\n\(app.debugDescription)")
         save.tap()
 
-        let row = app.staticTexts["Alice"]
+        let closed = app.buttons["Cancel"].waitForNonExistence(timeout: 90)
         attach(app, "04-control-legit-saved")
-        XCTAssertTrue(row.waitForExistence(timeout: 90),
-                      "Control contact was not saved.\n\(app.debugDescription)")
+        XCTAssertFalse(app.alerts.element.exists,
+                       "The wallet-signed control card was rejected.\n\(app.debugDescription)")
+        XCTAssertTrue(closed,
+                      "Control contact was not saved — the sheet stayed open.\n\(app.debugDescription)")
     }
 
     /// Control — a card that claims the impersonated address but is signed by a
@@ -127,13 +157,17 @@ final class AttackE2ETests: XCTestCase {
         XCTAssertTrue(app.buttons["Cancel"].waitForExistence(timeout: 120),
                       "Forged invite did not open the sheet.\n\(app.debugDescription)")
 
-        let save = app.buttons["Add contact"]
-        if save.exists { save.tap() }
+        let save = saveButton(app)
+        XCTAssertTrue(save.waitForExistence(timeout: 60),
+                      "Forged invite never reached the save button, so the guard was never asked.\n\(app.debugDescription)")
+        save.tap()
 
-        let rejected = app.alerts.element.waitForExistence(timeout: 30)
-                        || save.exists
+        // The guard's own rejection signal: an alert, with the sheet still open.
+        let alert = app.alerts.element.waitForExistence(timeout: 60)
         attach(app, "05-control-forged-rejected")
-        XCTAssertTrue(rejected,
-                      "Forged signature was not rejected.\n\(app.debugDescription)")
+        XCTAssertTrue(alert,
+                      "Forged signature was not rejected — no alert appeared.\n\(app.debugDescription)")
+        XCTAssertTrue(sheetIsOpen(app),
+                      "Forged signature was not rejected — the sheet closed, so the contact may have been saved.\n\(app.debugDescription)")
     }
 }
