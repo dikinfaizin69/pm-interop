@@ -106,7 +106,7 @@ if let linkString = externalLink {
             check("InviteInbox would accept + prefill nickname", card.profile?.nickname != nil,
                   "nickname = \(card.profile?.nickname ?? "nil")")
             if let bundle = try? PrekeyBundle.fromBase64(card.bundle) {
-                check("bundle carries walletAddress", bundle.walletAddress != nil,
+                check("bundle carries NO walletAddress (field omitted)", bundle.walletAddress == nil,
                       "walletAddress = \(bundle.walletAddress ?? "nil")")
                 let g = addFromQRGuard(bundle: bundle, cardAddress: card.address)
                 print("       guard verdict: \(g.passed ? "ACCEPTED" : "REJECTED") — \(g.why)")
@@ -234,8 +234,7 @@ func victimBundle(for wallet: Curve25519.Signing.PrivateKey) throws -> PrekeyBun
         oneTimePrekeyPublic: nil,
         signingIdentityKey: sig.publicKey.rawRepresentation
     )
-    let seed = wallet.publicKey.rawRepresentation
-    var secret = seed
-    secret.append(seed)
+    var secret = wallet.rawRepresentation                    // 32-byte Ed25519 seed
+    secret.append(wallet.publicKey.rawRepresentation)        // 32-byte public key
     return raw.walletSigned(address: SolanaAddress.string(from: seed), keypair: KeyPair(secretKey: secret))
 }
