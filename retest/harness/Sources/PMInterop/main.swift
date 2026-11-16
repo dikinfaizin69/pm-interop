@@ -84,7 +84,7 @@ func walletBoundBundle(wallet: Curve25519.Signing.PrivateKey) throws -> PrekeyBu
     let sig = Curve25519.Signing.PrivateKey()
     let spk = Curve25519.KeyAgreement.PrivateKey()
     let spkSig = try sig.signature(for: spk.publicKey.rawRepresentation)
-    let raw = PrekeyBundle(
+    let raw = try PrekeyBundle(
         dhIdentityKey: dh.publicKey.rawRepresentation,
         signedPrekeyPublic: spk.publicKey.rawRepresentation,
         signedPrekeySignature: Data(spkSig),
@@ -179,7 +179,8 @@ check("neither address is the attacker's wallet",
       && SolanaAddress.string(from: attacker.sigIK.publicKey.rawRepresentation) != impersonatedAddress)
 
 // --- the card the attacker sends
-var card = ContactCard(address: impersonatedAddress, bundle: try attacker.unsignedBundle().base64Encoded)
+let publishedBundle = try attacker.unsignedBundle()
+var card = ContactCard(address: impersonatedAddress, bundle: publishedBundle.base64Encoded)
 card.profile = ProfileSnapshot(nickname: "Alice")
 
 let link = InviteLink.url(for: card)!
@@ -224,8 +225,19 @@ check("control: claiming the address trips the guard", !claimedVerdict.accepted,
 check("contact id the app will store == impersonated address", receivedCard.address == impersonatedAddress)
 check("contact name the app will store == attacker-chosen name",
       (receivedCard.profile?.nickname ?? "") == "Alice")
+// The stored bundle must carry the attacker's exact key material. JSON byte
+// equality is not the point (re-encoding a decoded struct is not guaranteed to
+// be byte-stable), so compare the keys the session is actually built from.
+let sameKeyMaterial =
+    receivedBundle.dhIdentityKey == publishedBundle.dhIdentityKey
+    && receivedBundle.signingIdentityKey == publishedBundle.signingIdentityKey
+    && receivedBundle.signedPrekeyPublic == publishedBundle.signedPrekeyPublic
+    && receivedBundle.signedPrekeySignature == publishedBundle.signedPrekeySignature
 check("contact bundle the app will store == attacker's published bundle",
-      receivedBundle.base64Encoded == card.bundle)
+      sameKeyMaterial,
+      receivedBundle.base64Encoded == publishedBundle.base64Encoded
+        ? "base64-identical"
+        : "key material identical (base64 re-encoding differs)")
 
 // --- user sends: X3DH over the stored bundle, exactly as MessageSender does
 let userSK = try X3DH.senderSharedSecret(
