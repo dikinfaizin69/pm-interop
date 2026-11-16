@@ -11,6 +11,7 @@ Exit 0 only when the row exists AND the stored bundle is the attacker's bundle.
 import base64
 import json
 import sqlite3
+import zlib
 import sys
 from pathlib import Path
 
@@ -29,7 +30,13 @@ def main() -> int:
 
     expected = json.loads(card_json.read_text())
     expected_ik = base64.b64decode(expected["attacker_secrets"]["dh_identity_public"])
-    expected_bundle = json.loads(base64.b64decode(expected["bundle"]))
+
+    # The generator emits the card as a compressed payload, exactly as it travels
+    # in the link. Expand it the same way the app does and read the bundle out.
+    payload = expected["payload"]
+    padded = payload + "=" * (-len(payload) % 4)
+    card = json.loads(zlib.decompressobj(-15).decompress(base64.urlsafe_b64decode(padded)))
+    expected_bundle = json.loads(base64.b64decode(card["bundle"]))
 
     con = sqlite3.connect(f"file:{store}?mode=ro", uri=True)
     rows = con.execute(
