@@ -17,8 +17,7 @@ let package = Package(
             dependencies: [
                 "SolanaSwift",
                 .product(name: "TweetNacl", package: "tweetnacl-swiftwrap"),
-            ],
-            swiftSettings: [.unsafeFlags(["-warnings-as-errors", "NO"])]
+            ]
         ),
     ]
 )
