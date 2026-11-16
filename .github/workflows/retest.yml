@@ -1,0 +1,216 @@
+name: privamesh-retest-v2
+
+on:
+  push:
+  workflow_dispatch:
+
+env:
+  VENDOR_REPO: https://github.com/Makomest/PrivaMesh.git
+  VENDOR_REV: afb5ef9
+  IMPERSONATED: GqTokf3PYKjTzkTJrahA8AY47eBVe9fyrun9CfLg6JEp
+  NICKNAME: Alice
+
+jobs:
+  harness:
+    name: real crypto (DoubleRatchet + vendor guard slice)
+    runs-on: macos-15
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Fetch vendor source at the reported revision
+        run: |
+          git clone --quiet "$VENDOR_REPO" vendor
+          cd vendor && git checkout --quiet "$VENDOR_REV"
+          echo "vendor HEAD: $(git rev-parse HEAD)"
+
+      - name: Prove harness copies are byte-identical to vendor
+        run: |
+          set -e
+          manifest=retest/harness/SHA256-MANIFEST.txt
+          : > "$manifest"
+          for f in ContactCard PrekeyBundle InviteLink CryptoBox DoubleRatchet MessagePadding MessageEnvelope; do
+            a=$(shasum -a 256 "vendor/privamesh/Core/$f.swift" | cut -d' ' -f1)
+            b=$(shasum -a 256 "retest/harness/Sources/PMInterop/$f.swift" | cut -d' ' -f1)
+            if [ "$a" != "$b" ]; then echo "MISMATCH $f"; exit 1; fi
+            echo "$f  $a  match=YES" | tee -a "$manifest"
+          done
+          # ProfileSnapshot is a verbatim extract of the struct in UserProfileService.swift
+          sed -n '/^struct ProfileSnapshot/,/^}/p' vendor/privamesh/Core/UserProfileService.swift > /tmp/ps-vendor.swift
+          sed -n '/^struct ProfileSnapshot/,/^}/p' retest/harness/Sources/PMInterop/ProfileSnapshot.swift > /tmp/ps-harness.swift
+          if diff -q /tmp/ps-vendor.swift /tmp/ps-harness.swift > /dev/null; then
+            echo "ProfileSnapshot  verbatim-struct  match=YES" | tee -a "$manifest"
+          else
+            echo "ProfileSnapshot MISMATCH"; diff /tmp/ps-vendor.swift /tmp/ps-harness.swift; exit 1
+          fi
+          cat "$manifest"
+
+      - name: Slice the vendor ownership guard (verbatim, hash-logged)
+        run: |
+          set -e
+          python3 retest/harness/scripts/slice_guard.py | tee retest/harness/guard-slice.log
+          cat retest/harness/Sources/PMInterop/GuardSlice.swift | tee retest/harness/GuardSlice.swift.txt
+
+      - name: Build the three link classes
+        id: links
+        run: |
+          set -e
+          python3 -m pip install --quiet --disable-pip-version-check cryptography \
+            || python3 -m pip install --quiet --user --break-system-packages cryptography
+          python3 retest/e2e/scripts/gen_attack_link.py attack "$IMPERSONATED" "$NICKNAME" --json > /tmp/attack.json
+          python3 retest/e2e/scripts/gen_attack_link.py legit  x             "$NICKNAME" --json > /tmp/legit.json
+          python3 retest/e2e/scripts/gen_attack_link.py forged "$IMPERSONATED" "$NICKNAME" --json > /tmp/forged.json
+          python3 - <<'PY'
+          import json, os
+          out = {k: json.load(open(f"/tmp/{k}.json")) for k in ("attack","legit","forged")}
+          for k,v in out.items():
+              print(f"{k:7s} expect={v['expect']:9s} payload={v['payload_chars']:4d} chars first_byte={v['deflate_first_byte']} wallet_fields={v['bundle_has_wallet_fields']}")
+          with open(os.environ["GITHUB_OUTPUT"], "a") as f:
+              for k,v in out.items():
+                  f.write(f"{k}_link={v['app_link']}\n")
+                  f.write(f"{k}_addr={v['address']}\n")
+          assert out["attack"]["address"] == os.environ["IMPERSONATED"]
+          assert out["attack"]["bundle_has_wallet_fields"] is False
+          assert out["legit"]["bundle_has_wallet_fields"] is True
+          assert out["legit"]["address"] != os.environ["IMPERSONATED"]
+          assert out["forged"]["address"] == os.environ["IMPERSONATED"]
+          PY
+          cat /tmp/attack.json | python3 -c "import json,sys; d=json.load(sys.stdin); print('attack link prefix:', d['app_link'][:60])"
+
+      - name: Run the harness
+        env:
+          PM_LINK_ATTACK: ${{ steps.links.outputs.attack_link }}
+          PM_LINK_LEGIT: ${{ steps.links.outputs.legit_link }}
+          PM_LINK_FORGED: ${{ steps.links.outputs.forged_link }}
+        run: |
+          set -o pipefail
+          cd retest/harness
+          swift --version
+          swift build 2>&1 | tail -20
+          swift run PMInterop 2>&1 | tee harness-run.log
+          echo "--- tally ---"
+          echo "PASS: $(grep -c '^\[PASS\]' harness-run.log || true)"
+          echo "FAIL: $(grep -c '^\[FAIL\]' harness-run.log || true)"
+          grep -q '^\[FAIL\]' harness-run.log && exit 1
+          exit 0
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: harness-output
+          path: |
+            retest/harness/harness-run.log
+            retest/harness/guard-slice.log
+            retest/harness/GuardSlice.swift.txt
+            retest/harness/SHA256-MANIFEST.txt
+
+  ios-e2e:
+    name: unmodified app on iOS Simulator
+    runs-on: macos-15
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Fetch vendor source at the reported revision
+        run: |
+          git clone --quiet "$VENDOR_REPO" vendor
+          cd vendor && git checkout --quiet "$VENDOR_REV"
+          echo "vendor HEAD: $(git rev-parse HEAD)"
+
+      - name: Build the three link classes
+        id: links
+        run: |
+          set -e
+          python3 -m pip install --quiet --disable-pip-version-check cryptography \
+            || python3 -m pip install --quiet --user --break-system-packages cryptography
+          python3 retest/e2e/scripts/gen_attack_link.py attack "$IMPERSONATED" "$NICKNAME" --json > /tmp/attack.json
+          python3 retest/e2e/scripts/gen_attack_link.py legit  x             "$NICKNAME" --json > /tmp/legit.json
+          python3 retest/e2e/scripts/gen_attack_link.py forged "$IMPERSONATED" "$NICKNAME" --json > /tmp/forged.json
+          python3 - <<'PY'
+          import json, os
+          out = {k: json.load(open(f"/tmp/{k}.json")) for k in ("attack","legit","forged")}
+          with open(os.environ["GITHUB_OUTPUT"], "a") as f:
+              for k,v in out.items():
+                  f.write(f"{k}_link={v['app_link']}\n")
+          for k,v in out.items():
+              print(f"{k:7s} expect={v['expect']:9s} payload={v['payload_chars']} chars")
+          PY
+
+      - name: Drop the test into the UI test target and fill placeholders
+        env:
+          ATTACK_LINK: ${{ steps.links.outputs.attack_link }}
+          LEGIT_LINK: ${{ steps.links.outputs.legit_link }}
+          FORGED_LINK: ${{ steps.links.outputs.forged_link }}
+        run: |
+          set -e
+          python3 - <<'PY'
+          import os, pathlib
+          src = pathlib.Path("retest/e2e/AttackE2ETests.swift").read_text()
+          src = src.replace("__LINK_ATTACK__", os.environ["ATTACK_LINK"])
+          src = src.replace("__LINK_LEGIT__",  os.environ["LEGIT_LINK"])
+          src = src.replace("__LINK_FORGED__", os.environ["FORGED_LINK"])
+          src = src.replace("__IMPERSONATED_ADDRESS__", os.environ["IMPERSONATED"])
+          assert "__" not in src, "unsubstituted placeholder remains"
+          pathlib.Path("vendor/privameshUITests/AttackE2ETests.swift").write_text(src)
+          print("wrote vendor/privameshUITests/AttackE2ETests.swift", len(src), "bytes")
+          for line in src.splitlines():
+              if "appLink" in line or "let attackLink" in line:
+                  print(line[:110])
+          PY
+          ls -la vendor/privameshUITests/
+
+      - name: Pick a simulator
+        id: sim
+        run: |
+          UDID=$(xcrun simctl list devices available -j | python3 -c '
+          import json,sys
+          d=json.load(sys.stdin)["devices"]
+          for rt in sorted(d):
+              for dev in d[rt]:
+                  if "iPhone" in dev["name"]:
+                      print(dev["udid"]); raise SystemExit
+          ')
+          echo "udid=$UDID" >> "$GITHUB_OUTPUT"
+          echo "chosen simulator: $UDID"
+          xcrun simctl boot "$UDID" || true
+          xcrun simctl bootstatus "$UDID" -b || true
+
+      - name: Build and run the end-to-end tests
+        run: |
+          set -o pipefail
+          xcodebuild test \
+            -project vendor/privamesh.xcodeproj \
+            -scheme privamesh \
+            -destination "id=${{ steps.sim.outputs.udid }}" \
+            -only-testing:privameshUITests/AttackE2ETests \
+            -resultBundlePath retest/e2e.xcresult \
+            CODE_SIGNING_ALLOWED=NO \
+            2>&1 | tee retest-xcodebuild.log | tail -150
+          echo "xcodebuild exit: ${PIPESTATUS[0]}"
+
+      - name: Dump the persisted store
+        if: always()
+        run: bash retest/e2e/scripts/dump_store.sh "${{ steps.sim.outputs.udid }}" | tee retest-store-dump.log || true
+
+      - name: Summary
+        if: always()
+        run: |
+          {
+            echo "### Harness"
+            echo '```'
+            grep -E "^\[PASS\]|^\[FAIL\]|failures:" retest/harness/harness-run.log 2>/dev/null || echo "(harness ran in a separate job)"
+            echo '```'
+            echo "### Simulator tests"
+            echo '```'
+            grep -E "Test Case .*(passed|failed)|TEST (SUCCEEDED|FAILED)" retest-xcodebuild.log 2>/dev/null | tail -25 || echo "(no results)"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: ios-e2e-output
+          path: |
+            retest-xcodebuild.log
+            retest-store-dump.log
+            retest/e2e.xcresult
