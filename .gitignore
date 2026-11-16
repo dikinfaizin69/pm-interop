@@ -1,0 +1,3 @@
+retest/harness/Sources/PMInterop/GuardSlice.swift
+retest/harness/*.log
+retest/harness/*.txt

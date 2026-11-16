@@ -16,17 +16,24 @@ import hashlib
 import pathlib
 import sys
 
+HARNESS_DIR = pathlib.Path(__file__).resolve().parents[1]   # .../retest/harness
+
+# Vendor source: explicit argv[1] wins, then the usual clone locations.
 CANDIDATES = [
+    *([pathlib.Path(sys.argv[1])] if len(sys.argv) > 1 else []),
     pathlib.Path("vendor/privamesh/Views/Chat/AddContactView.swift"),
+    HARNESS_DIR.parents[0] / "vendor/privamesh/Views/Chat/AddContactView.swift",
     pathlib.Path("/root/audit/privamesh/privamesh/Views/Chat/AddContactView.swift"),
 ]
-OUT = pathlib.Path("harness/Sources/PMInterop/GuardSlice.swift")
+OUT = HARNESS_DIR / "Sources/PMInterop/GuardSlice.swift"
 
 START, END = 601, 605  # the `if bundle.walletAddress != nil, !bundle.isBoundTo(...)` block
 
 
 def locate() -> pathlib.Path:
     for p in CANDIDATES:
+        if p.is_dir():
+            p = p / "privamesh/Views/Chat/AddContactView.swift"
         if p.exists():
             return p
     print("ERROR: AddContactView.swift not found. Run from the repo root after "
