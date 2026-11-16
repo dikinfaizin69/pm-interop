@@ -230,7 +230,9 @@ jobs:
             -destination "id=${{ steps.sim.outputs.udid }}" \
             -only-testing:privameshUITests/AttackE2ETests \
             -resultBundlePath retest/e2e.xcresult \
-            CODE_SIGNING_ALLOWED=NO \
+            -parallel-testing-enabled NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="-" \
             SWIFT_VERSION=5.0 \
             SWIFT_APPROACHABLE_CONCURRENCY=NO \
             SWIFT_DEFAULT_ACTOR_ISOLATION=nonisolated \
