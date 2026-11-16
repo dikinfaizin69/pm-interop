@@ -84,7 +84,7 @@ func walletBoundBundle(wallet: Curve25519.Signing.PrivateKey) throws -> PrekeyBu
     let sig = Curve25519.Signing.PrivateKey()
     let spk = Curve25519.KeyAgreement.PrivateKey()
     let spkSig = try sig.signature(for: spk.publicKey.rawRepresentation)
-    let raw = try PrekeyBundle(
+    let raw = PrekeyBundle(
         dhIdentityKey: dh.publicKey.rawRepresentation,
         signedPrekeyPublic: spk.publicKey.rawRepresentation,
         signedPrekeySignature: Data(spkSig),

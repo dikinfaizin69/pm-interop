@@ -14,10 +14,10 @@
 //  what the app actually persisted.
 //
 //  Placeholders substituted by CI from e2e/scripts/gen_attack_link.py:
-//      __LINK_ATTACK__   unsigned card, address of the impersonated wallet
-//      __LINK_LEGIT__    wallet-signed card, address the signer really owns
-//      __LINK_FORGED__   claims the impersonated address, signed by another wallet
-//      __IMPERSONATED_ADDRESS__
+//      link A  unsigned card, address of the impersonated wallet
+//      link B  wallet-signed card, address the signer really owns
+//      link C  claims the impersonated address, signed by another wallet
+//      plus the impersonated address itself
 //
 
 import XCTest

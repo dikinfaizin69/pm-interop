@@ -88,7 +88,12 @@ jobs:
           set -o pipefail
           cd retest/harness
           swift --version
-          swift build 2>&1 | tail -20
+          swift build 2>&1 | tee harness-build.log | tail -20
+          if grep -qE ": error:" harness-build.log; then
+            echo "--- build errors ---"
+            grep -E ": error:" harness-build.log | head -20
+            exit 1
+          fi
           swift run PMInterop 2>&1 | tee harness-run.log
           echo "--- tally ---"
           echo "PASS: $(grep -c '^\[PASS\]' harness-run.log || true)"
@@ -154,7 +159,8 @@ jobs:
           src = src.replace("__LINK_LEGIT__",  os.environ["LEGIT_LINK"])
           src = src.replace("__LINK_FORGED__", os.environ["FORGED_LINK"])
           src = src.replace("__IMPERSONATED_ADDRESS__", os.environ["IMPERSONATED"])
-          assert "__" not in src, "unsubstituted placeholder remains"
+          for token in ("__LINK_ATTACK__", "__LINK_LEGIT__", "__LINK_FORGED__", "__IMPERSONATED_ADDRESS__"):
+              assert token not in src, f"unsubstituted placeholder: {token}"
           pathlib.Path("vendor/privameshUITests/AttackE2ETests.swift").write_text(src)
           print("wrote vendor/privameshUITests/AttackE2ETests.swift", len(src), "bytes")
           for line in src.splitlines():
