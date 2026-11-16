@@ -116,14 +116,11 @@ final class AttackE2ETests: XCTestCase {
         XCTAssertTrue(closed,
                       "The sheet stayed open after one tap — the card was rejected.\n\(app.debugDescription)")
 
-        // And the contact is listed, under the name the attacker chose or under
-        // the impersonated address if the list prefers to show addresses.
-        let prefix = String(impersonatedAddress.prefix(8))
-        let row = app.staticTexts
-            .matching(NSPredicate(format: "label == %@ OR label CONTAINS[c] %@", "Alice", prefix))
-            .firstMatch
-        XCTAssertTrue(row.waitForExistence(timeout: 60),
-                      "Contact was not listed after the save.\n\(app.debugDescription)")
+        // Persistence itself is not asserted from the UI: the contact list is a
+        // separate screen with its own ordering, and a missing row there says
+        // nothing about what was written. The workflow dumps the app's SwiftData
+        // store after the run and verify_store.py checks the row's identifier and
+        // the stored bundle against this exact attack card.
     }
 
     /// Control — a wallet-signed card for an address the signer really owns must

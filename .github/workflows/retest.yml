@@ -244,6 +244,22 @@ jobs:
         if: always()
         run: bash retest/e2e/scripts/dump_store.sh "${{ steps.sim.outputs.udid }}" | tee retest-store-dump.log || true
 
+      # Machine-checked verdict on what the app persisted: the contact row must
+      # carry the impersonated address and the exact bundle the attack card
+      # carried. This replaces the earlier grep, which could not see inside the
+      # base64-encoded bundle.
+      - name: Verify the persisted contact against the attack card
+        if: always()
+        run: |
+          set -o pipefail
+          CONTAINER=$(xcrun simctl get_app_container "${{ steps.sim.outputs.udid }}" com.privamesh data)
+          DB=$(find "$CONTAINER" -type f -name '*.store' | head -1)
+          echo "store: $DB"
+          python3 retest/e2e/scripts/verify_store.py "$DB" /tmp/attack.json "$IMPERSONATED" \
+            | tee retest-store-verify.log
+        env:
+          IMPERSONATED: ${{ env.IMPERSONATED }}
+
       - name: Summary
         if: always()
         run: |
@@ -265,4 +281,5 @@ jobs:
           path: |
             retest-xcodebuild.log
             retest-store-dump.log
+            retest-store-verify.log
             retest/e2e.xcresult
