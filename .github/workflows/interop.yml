@@ -1,0 +1,34 @@
+name: interop
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  run:
+    runs-on: macos-14
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Toolchain
+        run: swift --version && xcodebuild -version
+
+      - name: Build
+        run: |
+          set -o pipefail
+          swift build -c release 2>&1 | tail -60
+
+      - name: Run harness
+        run: |
+          set -o pipefail
+          LINK="$(cat payload.txt)"
+          echo "payload chars: ${#LINK}"
+          swift run -c release PMInterop "$LINK" 2>&1 | tee harness-output.txt
+
+      - name: Upload output
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: harness-output
+          path: harness-output.txt
